@@ -50,13 +50,29 @@ func (a *interactAction) preparePage(ctx context.Context, actionType interactAct
 
 	page.MustNavigate(url)
 	page.MustWaitDOMStable()
-	time.Sleep(1 * time.Second)
+	// 页面到位后给一个 700~1500ms 的随机阅读停顿, 替代固定 1s
+	sleepRandom(700, 1500)
 
 	return page
 }
 
+// performClick 走"看一眼 → 鼠标贝塞尔靠近 → 点击"的人类操作路径,
+// 而不是直接 element.MustClick() 让 CDP 派发一个孤立的点击事件。
 func (a *interactAction) performClick(page *rod.Page, selector string) {
 	element := page.MustElement(selector)
+
+	// 移动鼠标到元素中心 (贝塞尔曲线)
+	if box, err := element.Shape(); err == nil && len(box.Quads) > 0 {
+		x := float64(box.Quads[0][0]+box.Quads[0][4]) / 2
+		y := float64(box.Quads[0][1]+box.Quads[0][5]) / 2
+		if err := humanMoveTo(page, x, y); err != nil {
+			logrus.Debugf("humanMoveTo 失败, 回退到默认点击: %v", err)
+		} else {
+			// 悬停 80~250ms 再按下, 接近真人 "鼠标到位 → 略停顿 → 按下" 的反应时
+			sleepRandom(80, 250)
+		}
+	}
+
 	element.MustClick()
 }
 
@@ -107,7 +123,8 @@ func (a *LikeAction) perform(ctx context.Context, feedID, xsecToken string, targ
 
 func (a *LikeAction) toggleLike(page *rod.Page, feedID string, targetLiked bool, actionType interactActionType) error {
 	a.performClick(page, SelectorLikeButton)
-	time.Sleep(3 * time.Second)
+	// 服务端处理点赞需要时间, 用 2.4~3.6s 随机区间替代固定 3s, 避免每次回扫一致的时间间隔
+	sleepRandom(2400, 3600)
 
 	liked, _, err := a.getInteractState(page, feedID)
 	if err != nil {
@@ -121,7 +138,7 @@ func (a *LikeAction) toggleLike(page *rod.Page, feedID string, targetLiked bool,
 
 	logrus.Warnf("feed %s %s可能未成功，状态未变化，尝试再次点击", feedID, actionType)
 	a.performClick(page, SelectorLikeButton)
-	time.Sleep(2 * time.Second)
+	sleepRandom(1600, 2500)
 
 	liked, _, err = a.getInteractState(page, feedID)
 	if err != nil {
@@ -183,7 +200,7 @@ func (a *FavoriteAction) perform(ctx context.Context, feedID, xsecToken string, 
 
 func (a *FavoriteAction) toggleFavorite(page *rod.Page, feedID string, targetCollected bool, actionType interactActionType) error {
 	a.performClick(page, SelectorCollectButton)
-	time.Sleep(3 * time.Second)
+	sleepRandom(2400, 3600)
 
 	_, collected, err := a.getInteractState(page, feedID)
 	if err != nil {
@@ -197,7 +214,7 @@ func (a *FavoriteAction) toggleFavorite(page *rod.Page, feedID string, targetCol
 
 	logrus.Warnf("feed %s %s可能未成功，状态未变化，尝试再次点击", feedID, actionType)
 	a.performClick(page, SelectorCollectButton)
-	time.Sleep(2 * time.Second)
+	sleepRandom(1600, 2500)
 
 	_, collected, err = a.getInteractState(page, feedID)
 	if err != nil {

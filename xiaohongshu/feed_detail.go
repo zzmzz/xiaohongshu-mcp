@@ -102,7 +102,8 @@ func (f *FeedDetailAction) GetFeedDetailWithConfig(ctx context.Context, feedID, 
 		logrus.Errorf("页面导航失败: %v", err)
 		return nil, err
 	}
-	sleepRandom(1000, 1000)
+	// 页面到位后, 给一段随机停留 (700~1500ms), 模拟"看一眼"的阅读延迟
+	sleepRandom(700, 1500)
 
 	if err := checkPageAccessible(page); err != nil {
 		return nil, err
@@ -426,11 +427,14 @@ func clickElementWithHumanBehavior(page *rod.Page, el *rod.Element, text string)
 
 			sleepRandom(reactionTimeRange.min, reactionTimeRange.max)
 
-			// 鼠标悬停
+			// 鼠标悬停: 用贝塞尔曲线移动到目标, 而不是 MustMoveTo 瞬移
 			if box, err := el.Shape(); err == nil && len(box.Quads) > 0 {
 				x := float64(box.Quads[0][0]+box.Quads[0][4]) / 2
 				y := float64(box.Quads[0][1]+box.Quads[0][5]) / 2
-				page.Mouse.MustMoveTo(x, y)
+				if mErr := humanMoveTo(page, x, y); mErr != nil {
+					logrus.Debugf("humanMoveTo 失败, 回退到 MustMoveTo: %v", mErr)
+					page.Mouse.MustMoveTo(x, y)
+				}
 				sleepRandom(hoverTimeRange.min, hoverTimeRange.max)
 			}
 
@@ -439,8 +443,8 @@ func clickElementWithHumanBehavior(page *rod.Page, el *rod.Element, text string)
 				return err // 返回错误以触发重试
 			}
 
-			// 模拟人类阅读时间
-			sleepRandom(readTimeRange.min, readTimeRange.max)
+			// 模拟人类阅读时间: 用对数正态分布, 大多数靠近中位数, 偶有长尾
+			readingPause(readTimeRange.min, readTimeRange.max)
 			clickSuccess = true
 			return nil
 		},
@@ -481,7 +485,11 @@ func humanScroll(page *rod.Page, speed string, largeMode bool, pushCount int) (b
 
 	for i := 0; i < max(1, pushCount); i++ {
 		scrollDelta := calculateScrollDelta(viewportHeight, baseRatio)
-		page.MustEval(`(delta) => { window.scrollBy(0, delta); }`, scrollDelta)
+		// 用真实 wheel 事件替代 window.scrollBy, 让前端埋点收到 wheel + scroll 完整事件链
+		if err := wheelScroll(page, scrollDelta); err != nil {
+			logrus.Debugf("wheelScroll 失败, 回退到 scrollBy: %v", err)
+			page.MustEval(`(delta) => { window.scrollBy(0, delta); }`, scrollDelta)
+		}
 
 		sleepRandom(scrollWaitRange.min, scrollWaitRange.max)
 

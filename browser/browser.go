@@ -223,13 +223,54 @@ func (b *Browser) NewPage() *rod.Page {
 		logrus.Warnf("setUserAgentOverride failed: %v", err)
 	}
 
-	// 2) addScriptToEvaluateOnNewDocument: 在每个 navigation 之前注入指纹覆盖脚本
+	// 2) Emulation.setTimezoneOverride: 与 IP / 语言区域对齐
+	//   即使容器 TZ 已经设过, 这里再走一次 CDP 也无副作用,
+	//   并且能在不重新部署的情况下通过 XHS_TIMEZONE 强制覆盖。
+	if err := applyTimezoneOverride(page); err != nil {
+		logrus.Warnf("setTimezoneOverride failed: %v", err)
+	}
+
+	// 3) Emulation.setDeviceMetricsOverride: 让 viewport / screen 与 launcher 的 window-size 对齐
+	//    headless 模式下默认 screen.width/height 可能与窗口不一致, 风控会用这个差值识别。
+	if err := applyDeviceMetrics(page, b.cfg); err != nil {
+		logrus.Warnf("setDeviceMetricsOverride failed: %v", err)
+	}
+
+	// 4) addScriptToEvaluateOnNewDocument: 在每个 navigation 之前注入指纹覆盖脚本
 	//    覆盖 navigator.webdriver、navigator.platform、navigator.languages、WebGL renderer/vendor、屏幕参数等
 	if _, err := page.EvalOnNewDocument(buildFingerprintScript(b.cfg)); err != nil {
 		logrus.Warnf("addScriptToEvaluateOnNewDocument failed: %v", err)
 	}
 
 	return page
+}
+
+// applyTimezoneOverride 通过 CDP 让 Intl.DateTimeFormat() 与 Date 对象使用真实使用区时区。
+//
+// 默认 Asia/Shanghai (与代理 IP 通常一致, 大陆站点最不容易触发风险), 可用 XHS_TIMEZONE 覆盖。
+func applyTimezoneOverride(page *rod.Page) error {
+	tz := os.Getenv("XHS_TIMEZONE")
+	if tz == "" {
+		tz = "Asia/Shanghai"
+	}
+	return proto.EmulationSetTimezoneOverride{TimezoneID: tz}.Call(page)
+}
+
+// applyDeviceMetrics 让 window.innerWidth/Height + screen.width/Height 与 launcher 启动窗口一致。
+func applyDeviceMetrics(page *rod.Page, cfg *browserConfig) error {
+	w := cfg.windowWidth
+	h := cfg.windowHeight
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	return proto.EmulationSetDeviceMetricsOverride{
+		Width:             w,
+		Height:            h,
+		DeviceScaleFactor: 1,
+		Mobile:            false,
+		ScreenWidth:       &w,
+		ScreenHeight:      &h,
+	}.Call(page)
 }
 
 // NewWarmedPage 创建页面后, 先访问 https://www.xiaohongshu.com 作为浏览历史, 再返回。
