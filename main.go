@@ -8,6 +8,7 @@ import (
 	"github.com/xpzouying/xiaohongshu-mcp/browser"
 	"github.com/xpzouying/xiaohongshu-mcp/configs"
 	"github.com/xpzouying/xiaohongshu-mcp/cookies"
+	"github.com/xpzouying/xiaohongshu-mcp/xiaohongshu"
 )
 
 // version 构建版本号，发布时通过 -ldflags "-X main.version=vX.Y.Z" 注入。
@@ -18,13 +19,19 @@ func main() {
 		headless bool
 		port     string
 		token    string
+		site     string // 站点: xiaohongshu | rednote
 	)
 	flag.BoolVar(&headless, "headless", true, "是否无头模式")
 	flag.StringVar(&port, "port", ":18060", "端口")
 	flag.StringVar(&token, "token", "", "鉴权 Token，留空则读取 AUTH_TOKEN")
+	flag.StringVar(&site, "site", xiaohongshu.SiteXiaohongshu, "站点: xiaohongshu | rednote")
 	flag.Parse()
 	if token == "" {
 		token = os.Getenv("AUTH_TOKEN")
+	}
+
+	if err := xiaohongshu.SetSite(site); err != nil {
+		logrus.Fatalf("站点配置错误: %v", err)
 	}
 
 	logrus.Infof("xiaohongshu-mcp version: %s", version)
@@ -38,9 +45,9 @@ func main() {
 
 	configs.InitHeadless(headless)
 	// 入口层解析出 seed 和代理，经 configs 透传给浏览器工厂。
-	// seed 取值：环境变量 > 会话文件 > 新生成并写回，保证同一账号每次启动一致。
+	// seed 取值：环境变量 > 会话文件 > 新生成并写回，保证同一账号每次启动一致(会话文件按站点隔离)。
 	configs.SetFingerprintSeed(configs.ResolveFingerprintSeed(
-		cookies.NewLoadCookie(cookies.GetCookiesFilePath())))
+		cookies.NewLoadCookie(cookies.GetCookiesFilePathForSite(site))))
 	configs.SetProxy(configs.ProxyFromEnv())
 
 	// 初始化服务
