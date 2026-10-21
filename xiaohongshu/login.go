@@ -119,8 +119,20 @@ func (a *LoginAction) FetchQrcodeImage(ctx context.Context) (string, bool, error
 		return "", true, nil
 	}
 
-	// 获取二维码图片(海外站可能无扫码入口,此时返回错误,请改用窗口手动登录)
-	src, err := pp.MustElement(".login-container .qrcode-img").Attribute("src")
+	// 首页已不再自动弹登录框,找不到二维码就去独立的 /login 页
+	const qrcodeSel = ".login-container .qrcode-img"
+	el, err := pp.Timeout(5 * time.Second).Element(qrcodeSel)
+	if err != nil {
+		if err := pp.Navigate(Site().Base + "/login"); err != nil {
+			return "", false, errors.Wrap(err, "open login page failed")
+		}
+		el, err = pp.Timeout(30 * time.Second).Element(qrcodeSel)
+		if err != nil {
+			return "", false, errors.Wrap(err, "qrcode not found on login page")
+		}
+	}
+
+	src, err := el.Attribute("src")
 	if err != nil {
 		return "", false, errors.Wrap(err, "get qrcode src failed")
 	}
