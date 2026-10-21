@@ -3,6 +3,7 @@ package xiaohongshu
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -128,6 +129,7 @@ func (a *LoginAction) FetchQrcodeImage(ctx context.Context) (string, bool, error
 		}
 		el, err = pp.Timeout(30 * time.Second).Element(qrcodeSel)
 		if err != nil {
+			dumpLoginPage(pp)
 			return "", false, errors.Wrap(err, "qrcode not found on login page")
 		}
 	}
@@ -178,4 +180,23 @@ func hasLoginCookie(page *rod.Page) bool {
 		}
 	}
 	return false
+}
+
+// dumpLoginPage 取不到二维码时留一张截图和当前 URL,方便判断是改版还是风控页
+func dumpLoginPage(page *rod.Page) {
+	pp := page.Timeout(10 * time.Second)
+	if info, err := pp.Info(); err == nil {
+		logrus.Warnf("登录页未找到二维码,当前 URL: %s, 标题: %s", info.URL, info.Title)
+	}
+	img, err := pp.Screenshot(false, nil)
+	if err != nil {
+		logrus.Warnf("登录页截图失败: %v", err)
+		return
+	}
+	path := "/app/images/login-debug.png"
+	if err := os.WriteFile(path, img, 0o644); err != nil {
+		logrus.Warnf("登录页截图保存失败: %v", err)
+		return
+	}
+	logrus.Warnf("登录页截图已保存: %s", path)
 }
