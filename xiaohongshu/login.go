@@ -153,10 +153,29 @@ func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
-			el, err := pp.Element(Site().LoggedInSel)
-			if err == nil && el != nil {
+			// 二维码现在在独立的 /login 页上,页面没有侧栏,只能靠登录后才下发的 id_token 判断
+			if hasLoginCookie(pp) {
+				// 稍等让会话 cookie 全部落定
+				time.Sleep(2 * time.Second)
+				return true
+			}
+			if has, _, err := pp.Has(Site().LoggedInSel); err == nil && has {
 				return true
 			}
 		}
 	}
+}
+
+// hasLoginCookie 游客也有 web_session,id_token 只在扫码登录后才下发
+func hasLoginCookie(page *rod.Page) bool {
+	cks, err := page.Browser().GetCookies()
+	if err != nil {
+		return false
+	}
+	for _, c := range cks {
+		if c.Name == "id_token" && c.Value != "" {
+			return true
+		}
+	}
+	return false
 }
